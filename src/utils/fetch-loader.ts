@@ -29,11 +29,13 @@ class FetchLoader implements Loader<LoaderContext> {
   private config!: LoaderConfiguration;
   private callbacks!: LoaderCallbacks<LoaderContext>;
   public stats: LoaderStats;
+  public loader: Response | null;
 
   constructor (config /* HlsConfig */) {
     this.fetchSetup = config.fetchSetup || getRequest;
     this.controller = new self.AbortController();
     this.stats = new LoadStats();
+    this.loader = null;
   }
 
   destroy (): void {
@@ -66,13 +68,14 @@ class FetchLoader implements Loader<LoaderContext> {
     this.config = config;
     this.callbacks = callbacks;
     this.request = this.fetchSetup(context, initParams);
+    self.clearTimeout(this.requestTimeout);
     this.requestTimeout = self.setTimeout(() => {
       this.abortInternal();
       callbacks.onTimeout(stats, context, this.response);
     }, config.timeout);
 
     self.fetch(this.request).then((response: Response): Promise<string | ArrayBuffer> => {
-      this.response = response;
+      this.response = this.loader = response;
 
       if (!response.ok) {
         const { status, statusText } = response;
@@ -91,7 +94,7 @@ class FetchLoader implements Loader<LoaderContext> {
       return response.text();
     }).then((responseData: string | ArrayBuffer) => {
       const { response } = this;
-      clearTimeout(this.requestTimeout);
+      self.clearTimeout(this.requestTimeout);
       stats.loading.end = Math.max(self.performance.now(), stats.loading.first);
       stats.loaded = stats.total = responseData[LENGTH];
 
@@ -106,7 +109,7 @@ class FetchLoader implements Loader<LoaderContext> {
 
       callbacks.onSuccess(loaderResponse, stats, context, response);
     }).catch((error) => {
-      clearTimeout(this.requestTimeout);
+      self.clearTimeout(this.requestTimeout);
       if (stats.aborted) {
         return;
       }
